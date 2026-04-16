@@ -1654,6 +1654,8 @@ class App {
   _startAudioExport(selected, btn) {
     // Create a MediaStream destination to capture audio output
     const streamDest = skyToneContext.createMediaStreamDestination();
+    // Mute speakers during export: disconnect from destination, connect to capture only
+    try { skyPianoCompressor.disconnect(skyToneContext.destination); } catch {}
     skyPianoCompressor.connect(streamDest);
 
     const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
@@ -1664,8 +1666,9 @@ class App {
     recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
 
     recorder.onstop = () => {
-      // Disconnect capture node
+      // Reconnect speakers and disconnect capture
       try { skyPianoCompressor.disconnect(streamDest); } catch {}
+      skyPianoCompressor.connect(skyToneContext.destination);
 
       const blob = new Blob(chunks, { type: mimeType });
       const url = URL.createObjectURL(blob);
