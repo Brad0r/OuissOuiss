@@ -533,36 +533,19 @@ footer {
     font-size: 1.6rem;
   }
 
-  /* Sky-style mobile keyboard: rotated landscape */
-  #keyboard-section {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    overflow: visible;
-    /* Reserve height = rotated width of the keyboard */
-    min-height: 95vw;
-  }
-
   #keyboard {
-    grid-template-columns: repeat(5, 1fr);
     gap: 8px;
     padding: 14px;
-    max-width: 88vw;
-    width: 88vw;
+    max-width: 340px;
     margin: 0 auto;
-    transform: rotate(90deg);
-    transform-origin: center center;
   }
 
   .key {
     border-width: 1.5px;
-    width: 100%;
   }
 
-  /* Counter-rotate key content so text stays readable */
   .key .note-name {
-    transform: rotate(-90deg);
-    font-size: 0.85rem;
+    font-size: 0.8rem;
   }
 
   .key .key-shortcut {
@@ -588,7 +571,55 @@ footer {
   }
 }
 
-@media (max-width: 400px) {
+/* Mobile landscape — Sky-style fullscreen keyboard */
+@media (max-height: 500px) and (orientation: landscape) {
+  #app {
+    padding: 8px 12px;
+    max-width: 100%;
+  }
+
+  header, #instrument-section, #controls, #volume-section,
+  #songs-section, footer {
+    display: none;
+  }
+
+  #keyboard-section {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    width: 100vw;
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 10;
+    background: linear-gradient(180deg, #0a0a2e 0%, #1a0a3e 40%, #2a1555 70%, #0d1b2a 100%);
+  }
+
+  #keyboard {
+    grid-template-columns: repeat(5, 1fr);
+    gap: 10px;
+    padding: 12px;
+    max-width: 98vw;
+    width: 98vw;
+    max-height: 90vh;
+  }
+
+  .key {
+    aspect-ratio: 1;
+    border-width: 2px;
+  }
+
+  .key .note-name {
+    font-size: 1rem;
+  }
+
+  .key .key-shortcut {
+    display: none;
+  }
+}
+
+@media (max-width: 400px) and (orientation: portrait) {
   #app {
     padding: 12px 8px 30px;
   }
@@ -598,17 +629,13 @@ footer {
   }
 
   #keyboard {
-    gap: 8px;
+    gap: 6px;
     padding: 12px;
     max-width: 100%;
   }
 
-  .key {
-    border-width: 1.5px;
-  }
-
   .key .note-name {
-    font-size: 0.8rem;
+    font-size: 0.75rem;
   }
 
   .ctrl-btn {
