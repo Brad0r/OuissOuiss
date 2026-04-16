@@ -1589,8 +1589,8 @@ class App {
     if (!playBtn || !downloadBtn || !deleteBtn) return;
 
     playBtn.disabled = !selected;
+    downloadBtn.disabled = !selected;
     const isUserSong = selected?.type === 'user';
-    downloadBtn.disabled = !isUserSong;
     deleteBtn.disabled = !isUserSong;
   }
 
@@ -1610,19 +1610,74 @@ class App {
 
   _downloadSelectedSong() {
     const selected = this._getSelectedSongMeta();
-    if (!selected || selected.type !== 'user') return;
+    if (!selected) return;
 
-    const uSong = selected.song;
-    const data = JSON.stringify({ title: uSong.title, info: uSong.info, events: uSong.events }, null, 2);
-    const blob = new Blob([data], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = uSong.title.replace(/[^a-zA-Z0-9àâéèêëïîôùûüçÀÂÉÈÊËÏÎÔÙÛÜÇ _-]/g, '') + '.json';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    const btn = document.getElementById('btn-song-download');
+    if (btn.disabled) return;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="icon">⏳</span> Export...';
+
+    ensureAudioContext(true);
+
+    // Create a MediaStream destination to capture audio output
+    const streamDest = skyToneContext.createMediaStreamDestination();
+    skyPianoCompressor.connect(streamDest);
+
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+      ? 'audio/webm;codecs=opus'
+      : 'audio/webm';
+    const recorder = new MediaRecorder(streamDest.stream, { mimeType });
+    const chunks = [];
+    recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+
+    recorder.onstop = () => {
+      // Disconnect capture node
+      try { skyPianoCompressor.disconnect(streamDest); } catch {}
+
+      const blob = new Blob(chunks, { type: mimeType });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const title = selected.song.title || selected.song.info || 'partition';
+      a.download = title.replace(/[^a-zA-Z0-9àâéèêëïîôùûüçÀÂÉÈÊËÏÎÔÙÛÜÇ _-]/g, '') + '.webm';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      btn.innerHTML = '<span class="icon">⬇</span> Télécharger';
+      btn.disabled = false;
+    };
+
+    recorder.start();
+
+    // Play the song through the normal audio engine (captured by MediaRecorder)
+    const onExportDone = () => {
+      // Small delay to capture tail/reverb
+      setTimeout(() => recorder.stop(), 1500);
+    };
+
+    if (selected.type === 'builtin') {
+      const song = selected.song;
+      const beatMs = 60000 / song.bpm;
+      let time = 0;
+      song.notes.forEach(note => {
+        setTimeout(() => {
+          playNote(note.n, this.currentInstrument.id);
+        }, time);
+        time += note.d * beatMs;
+      });
+      setTimeout(onExportDone, time + 500);
+    } else {
+      const events = selected.song.events || [];
+      events.forEach(evt => {
+        setTimeout(() => {
+          playNote(evt.noteId, evt.instrumentId || this.currentInstrument.id);
+        }, evt.time);
+      });
+      const lastTime = events.length > 0 ? events[events.length - 1].time : 0;
+      setTimeout(onExportDone, lastTime + 500);
+    }
   }
 
   _deleteSelectedSong() {
