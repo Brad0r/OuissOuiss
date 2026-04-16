@@ -371,6 +371,11 @@ section h2 {
   outline: none;
 }
 
+#song-select option {
+  background: #1a0a3e;
+  color: #e8dcc8;
+}
+
 #song-select:focus {
   border-color: rgba(255, 215, 0, 0.65);
   box-shadow: 0 0 0 3px rgba(255, 215, 0, 0.16);
