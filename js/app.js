@@ -1129,8 +1129,15 @@ class Recorder {
 
 class App {
   constructor() {
+    this.STORAGE_KEYS = {
+      userSongs: 'ouissouiss-songs',
+      recorderDraft: 'ouissouiss-recorder-draft',
+      currentInstrument: 'ouissouiss-current-instrument',
+      volume: 'ouissouiss-volume'
+    };
+
     this.recorder = new Recorder();
-    this.currentInstrument = INSTRUMENTS[0];
+    this.currentInstrument = this._getSavedInstrument();
     this.keyElements = {};
     this.pressedKeys = new Set();
 
@@ -1140,11 +1147,46 @@ class App {
     this._initAudioUnlock();
     this._buildInstruments();
     this._buildKeyboard();
+    this._restoreRecorderDraft();
     this._buildSongs();
     this._initControls();
     this._initVolume();
+    this._refreshSongActionButtons();
     this._initKeyboardShortcuts();
     this._initTouchEvents();
+  }
+
+  _getSavedInstrument() {
+    const savedId = localStorage.getItem(this.STORAGE_KEYS.currentInstrument);
+    return INSTRUMENTS.find(i => i.id === savedId) || INSTRUMENTS[0];
+  }
+
+  _getUserSongs() {
+    try {
+      return JSON.parse(localStorage.getItem(this.STORAGE_KEYS.userSongs) || '[]');
+    } catch {
+      return [];
+    }
+  }
+
+  _setUserSongs(songs) {
+    localStorage.setItem(this.STORAGE_KEYS.userSongs, JSON.stringify(songs));
+  }
+
+  _saveRecorderDraft() {
+    localStorage.setItem(this.STORAGE_KEYS.recorderDraft, JSON.stringify(this.recorder.events || []));
+  }
+
+  _restoreRecorderDraft() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(this.STORAGE_KEYS.recorderDraft) || '[]');
+      if (Array.isArray(parsed)) {
+        this.recorder.events = parsed.filter(evt => evt?.noteId && typeof evt.time === 'number');
+        this.recorder.events.sort((a, b) => a.time - b.time);
+      }
+    } catch {
+      this.recorder.events = [];
+    }
   }
 
   _initAudioUnlock() {
@@ -1160,17 +1202,21 @@ class App {
   }
 
   _buildInstruments() {
-    const list = document.getElementById('instrument-list');
+    const select = document.getElementById('instrument-select');
     INSTRUMENTS.forEach(inst => {
-      const btn = document.createElement('button');
-      btn.className = 'instrument-btn' + (inst.id === this.currentInstrument.id ? ' active' : '');
-      btn.innerHTML = `<span class="emoji">${inst.emoji}</span>${inst.name}`;
-      btn.addEventListener('click', () => this._selectInstrument(inst, btn));
-      list.appendChild(btn);
+      const opt = document.createElement('option');
+      opt.value = inst.id;
+      opt.textContent = `${inst.emoji} ${inst.name}`;
+      if (inst.id === this.currentInstrument.id) opt.selected = true;
+      select.appendChild(opt);
+    });
+    select.addEventListener('change', () => {
+      const inst = INSTRUMENTS.find(i => i.id === select.value);
+      if (inst) this._selectInstrument(inst);
     });
   }
 
-  _selectInstrument(inst, btn) {
+  _selectInstrument(inst) {
     // Stop all held voices from previous instrument to prevent parasitic sounds
     Object.keys(localHeldNotes).forEach(noteId => {
       const voiceId = localHeldNotes[noteId];
@@ -1182,8 +1228,9 @@ class App {
 
     this.currentInstrument = inst;
     currentInstrumentId = inst.id;
-    document.querySelectorAll('.instrument-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
+    localStorage.setItem(this.STORAGE_KEYS.currentInstrument, inst.id);
+    const select = document.getElementById('instrument-select');
+    if (select.value !== inst.id) select.value = inst.id;
     warmupSamples(inst.id);
   }
 
@@ -1274,6 +1321,7 @@ class App {
 
     const instrument = this.currentInstrument;
     this.recorder.addNote(noteId, instrument.id);
+    this._saveRecorderDraft();
 
     if (instrument.sustain) {
       const existingVoiceId = localHeldNotes[noteId];
@@ -1329,6 +1377,7 @@ class App {
 
     const stopRecording = () => {
       this.recorder.stop();
+      this._saveRecorderDraft();
       btnRec.classList.remove('recording');
       btnOverdub.classList.remove('recording');
       btnRec.innerHTML = '<span class="icon">●</span> Rec';
@@ -1347,6 +1396,7 @@ class App {
       } else {
         this.songPlayer.stop();
         this.recorder.start();
+        this._saveRecorderDraft();
         btnRec.classList.add('recording');
         btnRec.innerHTML = '<span class="icon">■</span> Stop Rec';
         btnOverdub.disabled = true;
@@ -1393,6 +1443,7 @@ class App {
 
     btnClear.addEventListener('click', () => {
       this.recorder.events = [];
+      this._saveRecorderDraft();
       btnPlay.disabled = true;
       btnClear.disabled = true;
       btnStop.disabled = true;
@@ -1404,16 +1455,23 @@ class App {
       if (!this.recorder.hasData()) return;
       const name = prompt('Nom de la partition :');
       if (!name || !name.trim()) return;
-      const userSongs = JSON.parse(localStorage.getItem('ouissouiss-songs') || '[]');
+      const userSongs = this._getUserSongs();
       userSongs.push({
         title: name.trim(),
         info: 'Ma partition',
         events: JSON.parse(JSON.stringify(this.recorder.events)),
         createdAt: Date.now()
       });
-      localStorage.setItem('ouissouiss-songs', JSON.stringify(userSongs));
+      this._setUserSongs(userSongs);
       this._rebuildSongs();
     });
+
+    if (this.recorder.hasData()) {
+      btnPlay.disabled = false;
+      btnClear.disabled = false;
+      btnSave.disabled = false;
+      btnOverdub.disabled = false;
+    }
   }
 
   _initVolume() {
@@ -1423,11 +1481,20 @@ class App {
 
     const updateVolume = (val) => {
       musicVolume = val / 100;
+      localStorage.setItem(this.STORAGE_KEYS.volume, String(val));
       if (skyPianoMasterGain) {
         skyPianoMasterGain.gain.setValueAtTime(musicVolume * 2.8, skyPianoCtx.currentTime);
       }
       icon.textContent = val == 0 ? '🔇' : val < 40 ? '🔉' : '🔊';
     };
+
+    const savedVolume = Number(localStorage.getItem(this.STORAGE_KEYS.volume));
+    if (Number.isFinite(savedVolume) && savedVolume >= 0 && savedVolume <= 100) {
+      slider.value = String(savedVolume);
+      updateVolume(savedVolume);
+    } else {
+      updateVolume(Number(slider.value));
+    }
 
     slider.addEventListener('input', () => updateVolume(Number(slider.value)));
     icon.addEventListener('click', () => {
@@ -1452,104 +1519,121 @@ class App {
       btnPlay.disabled = false;
       btnOverdub.disabled = false;
     }
-    document.querySelectorAll('.song-card.playing').forEach(c => c.classList.remove('playing'));
   }
 
   _buildSongs() {
-    const list = document.getElementById('song-list');
-    list.innerHTML = '';
+    const select = document.getElementById('song-select');
+    if (!select) return;
 
-    // Built-in songs
-    SONGS.forEach(song => {
-      const card = document.createElement('button');
-      card.className = 'song-card';
-      card.innerHTML = `
-        <div class="song-title">▶ ${song.title}</div>
-        <div class="song-info">${song.info}</div>
-      `;
-      card.addEventListener('click', () => {
-        ensureAudioContext(true);
-        if (this.songPlayer.isPlaying && this.songPlayer.currentSong === song) {
-          this.songPlayer.stop();
-          card.classList.remove('playing');
-          this._onPlaybackStop();
-          return;
-        }
-        document.querySelectorAll('.song-card.playing').forEach(c => c.classList.remove('playing'));
-        card.classList.add('playing');
-        document.getElementById('btn-stop').disabled = false;
-        this.songPlayer.play(song, this.currentInstrument.id);
-      });
-      list.appendChild(card);
+    const previousValue = select.value;
+    const options = [];
+
+    SONGS.forEach((song, index) => {
+      options.push(`<option value="builtin:${index}">Sky: ${this._escapeHtml(song.title)} — ${this._escapeHtml(song.info)}</option>`);
     });
 
-    // User songs from localStorage
-    const userSongs = JSON.parse(localStorage.getItem('ouissouiss-songs') || '[]');
-    userSongs.forEach((uSong, index) => {
-      const wrapper = document.createElement('div');
-      wrapper.className = 'song-card-wrapper';
-
-      const card = document.createElement('button');
-      card.className = 'song-card user-song';
-      card.innerHTML = `
-        <div class="song-title">▶ ${this._escapeHtml(uSong.title)}</div>
-        <div class="song-info">${this._escapeHtml(uSong.info)}</div>
-      `;
-      card.addEventListener('click', () => {
-        ensureAudioContext(true);
-        if (this.songPlayer.isPlaying && this.songPlayer._currentUserSongIndex === index) {
-          this.songPlayer.stop();
-          card.classList.remove('playing');
-          this._onPlaybackStop();
-          return;
-        }
-        document.querySelectorAll('.song-card.playing').forEach(c => c.classList.remove('playing'));
-        card.classList.add('playing');
-        document.getElementById('btn-stop').disabled = false;
-        this.songPlayer._currentUserSongIndex = index;
-        this.songPlayer.playRecording(uSong.events, this.currentInstrument.id);
-      });
-
-      const deleteBtn = document.createElement('button');
-      deleteBtn.className = 'song-delete-btn';
-      deleteBtn.textContent = '✕';
-      deleteBtn.title = 'Supprimer cette partition';
-      deleteBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (!confirm(`Supprimer « ${uSong.title} » ?`)) return;
-        const songs = JSON.parse(localStorage.getItem('ouissouiss-songs') || '[]');
-        songs.splice(index, 1);
-        localStorage.setItem('ouissouiss-songs', JSON.stringify(songs));
-        this._rebuildSongs();
-      });
-
-      const downloadBtn = document.createElement('button');
-      downloadBtn.className = 'song-download-btn';
-      downloadBtn.textContent = '⬇';
-      downloadBtn.title = 'Télécharger cette partition';
-      downloadBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const data = JSON.stringify({ title: uSong.title, info: uSong.info, events: uSong.events }, null, 2);
-        const blob = new Blob([data], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = uSong.title.replace(/[^a-zA-Z0-9àâéèêëïîôùûüçÀÂÉÈÊËÏÎÔÙÛÜÇ _-]/g, '') + '.json';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      });
-
-      wrapper.appendChild(card);
-      wrapper.appendChild(downloadBtn);
-      wrapper.appendChild(deleteBtn);
-      list.appendChild(wrapper);
+    this._getUserSongs().forEach((song, index) => {
+      options.push(`<option value="user:${index}">Mes partitions: ${this._escapeHtml(song.title)}</option>`);
     });
+
+    select.innerHTML = options.join('');
+    if (options.length === 0) {
+      select.innerHTML = '<option value="">Aucune partition</option>';
+      select.value = '';
+    } else if (options.some(opt => opt.includes(`value="${previousValue}"`))) {
+      select.value = previousValue;
+    }
+
+    if (!this._songMenuBound) {
+      this._songMenuBound = true;
+      document.getElementById('btn-song-play')?.addEventListener('click', () => this._playSelectedSong());
+      document.getElementById('btn-song-download')?.addEventListener('click', () => this._downloadSelectedSong());
+      document.getElementById('btn-song-delete')?.addEventListener('click', () => this._deleteSelectedSong());
+      select.addEventListener('change', () => this._refreshSongActionButtons());
+    }
+
+    this._refreshSongActionButtons();
   }
 
   _rebuildSongs() {
     this._buildSongs();
+  }
+
+  _getSelectedSongMeta() {
+    const select = document.getElementById('song-select');
+    const value = select?.value || '';
+    if (!value.includes(':')) return null;
+    const [type, rawIndex] = value.split(':');
+    const index = Number(rawIndex);
+    if (!Number.isInteger(index) || index < 0) return null;
+
+    if (type === 'builtin') {
+      const song = SONGS[index];
+      return song ? { type, index, song } : null;
+    }
+
+    if (type === 'user') {
+      const songs = this._getUserSongs();
+      const song = songs[index];
+      return song ? { type, index, song } : null;
+    }
+
+    return null;
+  }
+
+  _refreshSongActionButtons() {
+    const selected = this._getSelectedSongMeta();
+    const playBtn = document.getElementById('btn-song-play');
+    const downloadBtn = document.getElementById('btn-song-download');
+    const deleteBtn = document.getElementById('btn-song-delete');
+    if (!playBtn || !downloadBtn || !deleteBtn) return;
+
+    playBtn.disabled = !selected;
+    const isUserSong = selected?.type === 'user';
+    downloadBtn.disabled = !isUserSong;
+    deleteBtn.disabled = !isUserSong;
+  }
+
+  _playSelectedSong() {
+    const selected = this._getSelectedSongMeta();
+    if (!selected) return;
+
+    ensureAudioContext(true);
+    document.getElementById('btn-stop').disabled = false;
+
+    if (selected.type === 'builtin') {
+      this.songPlayer.play(selected.song, this.currentInstrument.id);
+    } else {
+      this.songPlayer.playRecording(selected.song.events || [], this.currentInstrument.id);
+    }
+  }
+
+  _downloadSelectedSong() {
+    const selected = this._getSelectedSongMeta();
+    if (!selected || selected.type !== 'user') return;
+
+    const uSong = selected.song;
+    const data = JSON.stringify({ title: uSong.title, info: uSong.info, events: uSong.events }, null, 2);
+    const blob = new Blob([data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = uSong.title.replace(/[^a-zA-Z0-9àâéèêëïîôùûüçÀÂÉÈÊËÏÎÔÙÛÜÇ _-]/g, '') + '.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  _deleteSelectedSong() {
+    const selected = this._getSelectedSongMeta();
+    if (!selected || selected.type !== 'user') return;
+    if (!confirm(`Supprimer « ${selected.song.title} » ?`)) return;
+
+    const songs = this._getUserSongs();
+    songs.splice(selected.index, 1);
+    this._setUserSongs(songs);
+    this._rebuildSongs();
   }
 
   _escapeHtml(str) {

@@ -29,7 +29,7 @@
     <!-- Instrument Selector -->
     <section id="instrument-section">
       <h2>Instruments</h2>
-      <div id="instrument-list"></div>
+      <select id="instrument-select" aria-label="Choisir un instrument"></select>
     </section>
 
     <!-- Keyboard -->
@@ -70,7 +70,20 @@
     <!-- Song Library -->
     <section id="songs-section">
       <h2>♫ Partitions</h2>
-      <div id="song-list"></div>
+      <div id="songs-menu">
+        <select id="song-select" aria-label="Choisir une partition"></select>
+        <div id="song-actions">
+          <button id="btn-song-play" class="ctrl-btn" type="button">
+            <span class="icon">▶</span> Jouer
+          </button>
+          <button id="btn-song-download" class="ctrl-btn" type="button" disabled>
+            <span class="icon">⬇</span> Télécharger
+          </button>
+          <button id="btn-song-delete" class="ctrl-btn" type="button" disabled>
+            <span class="icon">✕</span> Supprimer
+          </button>
+        </div>
+      </div>
     </section>
 
     <footer>
