@@ -533,13 +533,25 @@ footer {
     font-size: 1.6rem;
   }
 
-  /* Sky-style mobile keyboard: 3 columns x 5 rows */
+  /* Sky-style mobile keyboard: rotated landscape */
+  #keyboard-section {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: visible;
+    /* Reserve height = rotated width of the keyboard */
+    min-height: 95vw;
+  }
+
   #keyboard {
-    grid-template-columns: repeat(3, 1fr);
-    gap: 10px;
-    padding: 16px;
-    max-width: 320px;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 8px;
+    padding: 14px;
+    max-width: 88vw;
+    width: 88vw;
     margin: 0 auto;
+    transform: rotate(90deg);
+    transform-origin: center center;
   }
 
   .key {
@@ -547,8 +559,10 @@ footer {
     width: 100%;
   }
 
+  /* Counter-rotate key content so text stays readable */
   .key .note-name {
-    font-size: 0.9rem;
+    transform: rotate(-90deg);
+    font-size: 0.85rem;
   }
 
   .key .key-shortcut {
