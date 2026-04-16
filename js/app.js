@@ -563,9 +563,6 @@ function createVoice(note, instrumentId, options = {}) {
   voiceGain.gain.setValueAtTime(0, now);
   voiceGain.gain.linearRampToValueAtTime(0.0001, now + fadeInTime);
 
-  // Warm up samples in background
-  warmupSamples(instrumentId);
-
   // === SAMPLE-BASED PLAYBACK ===
   if (sampleConfig && sampleEntry?.status === "ready" && sampleEntry.buffer) {
     const source = ctx.createBufferSource();
@@ -1652,9 +1649,8 @@ class App {
   }
 
   _startAudioExport(selected, btn) {
-    // Calculate total duration
-    let totalSeconds;
-    const noteSchedule = []; // { timeSec, noteId, instrumentId }
+    // Calculate total duration and note schedule
+    const noteSchedule = [];
 
     if (selected.type === 'builtin') {
       const song = selected.song;
@@ -1664,20 +1660,29 @@ class App {
         noteSchedule.push({ timeSec: timeMs / 1000, noteId: note.n, instrumentId: this.currentInstrument.id });
         timeMs += note.d * beatMs;
       });
-      totalSeconds = (timeMs / 1000) + 3;
     } else {
       const events = selected.song.events || [];
       events.forEach(evt => {
         noteSchedule.push({ timeSec: evt.time / 1000, noteId: evt.noteId, instrumentId: evt.instrumentId || this.currentInstrument.id });
       });
-      const lastTime = events.length > 0 ? events[events.length - 1].time : 0;
-      totalSeconds = (lastTime / 1000) + 3;
     }
 
+    const lastTimeSec = noteSchedule.length > 0 ? noteSchedule[noteSchedule.length - 1].timeSec : 0;
+    const totalSeconds = lastTimeSec + 4;
     const sampleRate = skyToneContext.sampleRate;
-    const offCtx = new OfflineAudioContext(2, Math.ceil(sampleRate * totalSeconds), sampleRate);
 
-    // Build offline audio chain (same as ensureAudioContext)
+    let offCtx;
+    try {
+      offCtx = new OfflineAudioContext(2, Math.ceil(sampleRate * totalSeconds), sampleRate);
+    } catch (e) {
+      console.error('OfflineAudioContext not supported:', e);
+      alert('Export audio non supporté sur ce navigateur.');
+      btn.innerHTML = '<span class="icon">⬇</span> Télécharger';
+      btn.disabled = false;
+      return;
+    }
+
+    // Build offline audio chain
     const offMasterGain = offCtx.createGain();
     const offWetGain = offCtx.createGain();
     const offConvolver = offCtx.createConvolver();
@@ -1703,36 +1708,37 @@ class App {
     offWetGain.connect(offCompressor);
     offCompressor.connect(offCtx.destination);
 
-    // Save real globals
-    const realCtx = skyToneContext;
-    const realMaster = skyPianoMasterGain;
-    const realWet = skyPianoWetGain;
-    const realConv = skyPianoConvolver;
-    const realComp = skyPianoCompressor;
+    // Temporarily swap globals so createVoice routes to offline chain
+    const saved = {
+      ctx: skyToneContext,
+      master: skyPianoMasterGain,
+      wet: skyPianoWetGain,
+      conv: skyPianoConvolver,
+      comp: skyPianoCompressor
+    };
 
-    // Swap to offline context
     skyToneContext = offCtx;
     skyPianoMasterGain = offMasterGain;
     skyPianoWetGain = offWetGain;
     skyPianoConvolver = offConvolver;
     skyPianoCompressor = offCompressor;
 
-    // Schedule all notes on offline context
-    noteSchedule.forEach(({ timeSec, noteId, instrumentId }) => {
-      const note = NOTES.find(n => n.id === noteId);
-      if (!note) return;
-      createVoice(note, instrumentId, { sustain: false, timeOffset: timeSec });
-    });
-
-    // Restore globals before rendering (rendering is async)
-    skyToneContext = realCtx;
-    skyPianoMasterGain = realMaster;
-    skyPianoWetGain = realWet;
-    skyPianoConvolver = realConv;
-    skyPianoCompressor = realComp;
+    try {
+      noteSchedule.forEach(({ timeSec, noteId, instrumentId }) => {
+        const note = NOTES.find(n => n.id === noteId);
+        if (!note) return;
+        createVoice(note, instrumentId, { sustain: false, timeOffset: timeSec });
+      });
+    } finally {
+      // Always restore globals immediately
+      skyToneContext = saved.ctx;
+      skyPianoMasterGain = saved.master;
+      skyPianoWetGain = saved.wet;
+      skyPianoConvolver = saved.conv;
+      skyPianoCompressor = saved.comp;
+    }
 
     offCtx.startRendering().then(audioBuffer => {
-      // Encode as WAV
       const wavBlob = this._encodeWAV(audioBuffer);
       const url = URL.createObjectURL(wavBlob);
       const a = document.createElement('a');
@@ -1746,7 +1752,9 @@ class App {
 
       btn.innerHTML = '<span class="icon">⬇</span> Télécharger';
       btn.disabled = false;
-    }).catch(() => {
+    }).catch(err => {
+      console.error('Export error:', err);
+      alert('Erreur lors de l\'export audio.');
       btn.innerHTML = '<span class="icon">⬇</span> Télécharger';
       btn.disabled = false;
     });
