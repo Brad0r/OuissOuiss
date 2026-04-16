@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>OuissOuiss — Sky Music</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;600;700&family=Cinzel+Decorative:wght@700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <!-- Animated background -->
+  <div id="stars"></div>
+  <div id="stars2"></div>
+  <div id="clouds"></div>
+
+  <div id="app">
+    <header>
+      <h1>✦ OuissOuiss ✦</h1>
+    </header>
+
+    <!-- Audio unlock overlay (required by browsers) -->
+    <div id="audio-unlock" class="overlay">
+      <div class="overlay-content">
+        <p>✦ Touche l'écran pour commencer ✦</p>
+      </div>
+    </div>
+
+    <!-- Instrument Selector -->
+    <section id="instrument-section">
+      <h2>Instruments</h2>
+      <div id="instrument-list"></div>
+    </section>
+
+    <!-- Keyboard -->
+    <section id="keyboard-section">
+      <div id="keyboard"></div>
+    </section>
+
+    <!-- Controls -->
+    <section id="controls">
+      <button id="btn-rec" class="ctrl-btn" title="Enregistrer">
+        <span class="icon">●</span> Rec
+      </button>
+      <button id="btn-overdub" class="ctrl-btn" title="Superposer une piste" disabled>
+        <span class="icon">⊕</span> Superposer
+      </button>
+      <button id="btn-play" class="ctrl-btn" title="Rejouer" disabled>
+        <span class="icon">▶</span> Play
+      </button>
+      <button id="btn-stop" class="ctrl-btn" title="Arrêter" disabled>
+        <span class="icon">■</span> Stop
+      </button>
+      <button id="btn-clear" class="ctrl-btn" title="Effacer" disabled>
+        <span class="icon">✕</span> Effacer
+      </button>
+      <button id="btn-save" class="ctrl-btn" title="Ajouter en partition" disabled>
+        <span class="icon">♫</span> Ajouter
+      </button>
+    </section>
+
+    <!-- Volume -->
+    <section id="volume-section">
+      <div id="volume-control">
+        <span id="volume-icon">🔊</span>
+        <input type="range" id="volume-slider" min="0" max="100" value="60">
+      </div>
+    </section>
+
+    <!-- Song Library -->
+    <section id="songs-section">
+      <h2>♫ Partitions</h2>
+      <div id="song-list"></div>
+    </section>
+
+    <footer>
+      <p>Inspiré par Sky: Children of the Light — thatgamecompany</p>
+    </footer>
+  </div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>
