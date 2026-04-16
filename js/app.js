@@ -1142,6 +1142,7 @@ class App {
     this.currentInstrument = this._getSavedInstrument();
     this.keyElements = {};
     this.pressedKeys = new Set();
+    this._samplesReady = true;
 
     this.songPlayer = new SongPlayer(noteId => this._flashKey(noteId));
     this.songPlayer.onStop = () => this._onPlaybackStop();
@@ -1198,7 +1199,9 @@ class App {
       // Show loading text
       const p = overlay.querySelector('.overlay-content p');
       if (p) p.textContent = '✦ Chargement... ✦';
+      this._samplesReady = false;
       warmupSamples(this.currentInstrument.id).then(() => {
+        this._samplesReady = true;
         overlay.classList.add('hidden');
         setTimeout(() => overlay.style.display = 'none', 500);
       });
@@ -1237,7 +1240,14 @@ class App {
     localStorage.setItem(this.STORAGE_KEYS.currentInstrument, inst.id);
     const select = document.getElementById('instrument-select');
     if (select.value !== inst.id) select.value = inst.id;
-    warmupSamples(inst.id);
+
+    // Block note playing until samples are loaded
+    this._samplesReady = false;
+    select.disabled = true;
+    warmupSamples(inst.id).then(() => {
+      this._samplesReady = true;
+      select.disabled = false;
+    });
   }
 
   _buildKeyboard() {
@@ -1323,6 +1333,7 @@ class App {
 
   _triggerNote(noteId, button) {
     if (this.pressedKeys.has(noteId)) return;
+    if (this._samplesReady === false) return; // Wait for samples to load
     this.pressedKeys.add(noteId);
 
     const instrument = this.currentInstrument;
@@ -1625,6 +1636,22 @@ class App {
 
     ensureAudioContext(true);
 
+    // Collect all instrument IDs used and warmup their samples first
+    const instrumentIds = new Set();
+    if (selected.type === 'builtin') {
+      instrumentIds.add(this.currentInstrument.id);
+    } else {
+      const events = selected.song.events || [];
+      events.forEach(evt => instrumentIds.add(evt.instrumentId || this.currentInstrument.id));
+      if (instrumentIds.size === 0) instrumentIds.add(this.currentInstrument.id);
+    }
+
+    Promise.all([...instrumentIds].map(id => warmupSamples(id))).then(() => {
+      this._startAudioExport(selected, btn);
+    });
+  }
+
+  _startAudioExport(selected, btn) {
     // Create a MediaStream destination to capture audio output
     const streamDest = skyToneContext.createMediaStreamDestination();
     skyPianoCompressor.connect(streamDest);
