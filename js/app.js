@@ -408,12 +408,14 @@ async function loadSample(instrumentId, noteId = "") {
 
 function warmupSamples(instrumentId) {
   const config = SAMPLE_CONFIGS[instrumentId];
-  if (!config) return;
+  if (!config) return Promise.resolve();
+  const promises = [];
   if (config.notes) {
-    Object.keys(config.notes).forEach(noteId => loadSample(instrumentId, noteId));
+    Object.keys(config.notes).forEach(noteId => promises.push(loadSample(instrumentId, noteId)));
   } else if (config.path) {
-    loadSample(instrumentId);
+    promises.push(loadSample(instrumentId));
   }
+  return Promise.all(promises);
 }
 
 // ==================== VOICE CREATION (from SabSab createMultiInstrumentVoice) ====================
@@ -1193,9 +1195,13 @@ class App {
     const overlay = document.getElementById('audio-unlock');
     const unlock = () => {
       ensureAudioContext(true);
-      warmupSamples(this.currentInstrument.id);
-      overlay.classList.add('hidden');
-      setTimeout(() => overlay.style.display = 'none', 500);
+      // Show loading text
+      const p = overlay.querySelector('.overlay-content p');
+      if (p) p.textContent = '✦ Chargement... ✦';
+      warmupSamples(this.currentInstrument.id).then(() => {
+        overlay.classList.add('hidden');
+        setTimeout(() => overlay.style.display = 'none', 500);
+      });
     };
     overlay.addEventListener('click', unlock, { once: true });
     overlay.addEventListener('touchstart', unlock, { once: true });
