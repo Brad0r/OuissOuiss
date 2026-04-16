@@ -424,7 +424,7 @@ function createVoice(note, instrumentId, options = {}) {
   const ctx = skyToneContext;
   if (!ctx || !skyPianoMasterGain || !note) return null;
 
-  const now = ctx.currentTime;
+  const now = ctx.currentTime + (options.timeOffset || 0);
   const instrument = INSTRUMENTS.find(i => i.id === instrumentId) || INSTRUMENTS[0];
   const sampleConfig = getSampleConfig(instrumentId, note.id);
   const resolvedNoteId = sampleConfig?._resolvedNoteId || note.id;
@@ -1652,30 +1652,93 @@ class App {
   }
 
   _startAudioExport(selected, btn) {
-    // Create a MediaStream destination to capture audio output
-    const streamDest = skyToneContext.createMediaStreamDestination();
-    // Mute speakers during export: disconnect from destination, connect to capture only
-    try { skyPianoCompressor.disconnect(skyToneContext.destination); } catch {}
-    skyPianoCompressor.connect(streamDest);
+    // Calculate total duration
+    let totalSeconds;
+    const noteSchedule = []; // { timeSec, noteId, instrumentId }
 
-    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-      ? 'audio/webm;codecs=opus'
-      : 'audio/webm';
-    const recorder = new MediaRecorder(streamDest.stream, { mimeType });
-    const chunks = [];
-    recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+    if (selected.type === 'builtin') {
+      const song = selected.song;
+      const beatMs = 60000 / song.bpm;
+      let timeMs = 0;
+      song.notes.forEach(note => {
+        noteSchedule.push({ timeSec: timeMs / 1000, noteId: note.n, instrumentId: this.currentInstrument.id });
+        timeMs += note.d * beatMs;
+      });
+      totalSeconds = (timeMs / 1000) + 3;
+    } else {
+      const events = selected.song.events || [];
+      events.forEach(evt => {
+        noteSchedule.push({ timeSec: evt.time / 1000, noteId: evt.noteId, instrumentId: evt.instrumentId || this.currentInstrument.id });
+      });
+      const lastTime = events.length > 0 ? events[events.length - 1].time : 0;
+      totalSeconds = (lastTime / 1000) + 3;
+    }
 
-    recorder.onstop = () => {
-      // Reconnect speakers and disconnect capture
-      try { skyPianoCompressor.disconnect(streamDest); } catch {}
-      skyPianoCompressor.connect(skyToneContext.destination);
+    const sampleRate = skyToneContext.sampleRate;
+    const offCtx = new OfflineAudioContext(2, Math.ceil(sampleRate * totalSeconds), sampleRate);
 
-      const blob = new Blob(chunks, { type: mimeType });
-      const url = URL.createObjectURL(blob);
+    // Build offline audio chain (same as ensureAudioContext)
+    const offMasterGain = offCtx.createGain();
+    const offWetGain = offCtx.createGain();
+    const offConvolver = offCtx.createConvolver();
+    const offCompressor = offCtx.createDynamicsCompressor();
+    offConvolver.buffer = buildSkyImpulseBuffer(offCtx);
+    offConvolver.normalize = true;
+
+    const offDryGain = offCtx.createGain();
+    offDryGain.gain.value = 0.92;
+    offWetGain.gain.value = 0.13;
+    offMasterGain.gain.value = Math.max(0.24, musicVolume * 2.8);
+
+    offCompressor.threshold.setValueAtTime(-18, 0);
+    offCompressor.knee.setValueAtTime(14, 0);
+    offCompressor.ratio.setValueAtTime(3, 0);
+    offCompressor.attack.setValueAtTime(0.003, 0);
+    offCompressor.release.setValueAtTime(0.08, 0);
+
+    offMasterGain.connect(offDryGain);
+    offMasterGain.connect(offConvolver);
+    offConvolver.connect(offWetGain);
+    offDryGain.connect(offCompressor);
+    offWetGain.connect(offCompressor);
+    offCompressor.connect(offCtx.destination);
+
+    // Save real globals
+    const realCtx = skyToneContext;
+    const realMaster = skyPianoMasterGain;
+    const realWet = skyPianoWetGain;
+    const realConv = skyPianoConvolver;
+    const realComp = skyPianoCompressor;
+
+    // Swap to offline context
+    skyToneContext = offCtx;
+    skyPianoMasterGain = offMasterGain;
+    skyPianoWetGain = offWetGain;
+    skyPianoConvolver = offConvolver;
+    skyPianoCompressor = offCompressor;
+
+    // Schedule all notes on offline context
+    noteSchedule.forEach(({ timeSec, noteId, instrumentId }) => {
+      const note = NOTES.find(n => n.id === noteId);
+      if (!note) return;
+      createVoice(note, instrumentId, { sustain: false, timeOffset: timeSec });
+    });
+
+    // Restore globals before rendering (rendering is async)
+    skyToneContext = realCtx;
+    skyPianoMasterGain = realMaster;
+    skyPianoWetGain = realWet;
+    skyPianoConvolver = realConv;
+    skyPianoCompressor = realComp;
+
+    offCtx.startRendering().then(audioBuffer => {
+      // Encode as WAV
+      const wavBlob = this._encodeWAV(audioBuffer);
+      const url = URL.createObjectURL(wavBlob);
       const a = document.createElement('a');
       a.href = url;
       const title = selected.song.title || selected.song.info || 'partition';
-      a.download = title.replace(/[^a-zA-Z0-9àâéèêëïîôùûüçÀÂÉÈÊËÏÎÔÙÛÜÇ _-]/g, '') + '.webm';
+      a.download = title.replace(/[^a-zA-Z0-9àâéèêëïîôùûüçÀÂÉÈÊËÏÎÔÙÛÜÇ _-]/g, '') + '.wav';
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -1683,37 +1746,50 @@ class App {
 
       btn.innerHTML = '<span class="icon">⬇</span> Télécharger';
       btn.disabled = false;
+    }).catch(() => {
+      btn.innerHTML = '<span class="icon">⬇</span> Télécharger';
+      btn.disabled = false;
+    });
+  }
+
+  _encodeWAV(audioBuffer) {
+    const numChannels = audioBuffer.numberOfChannels;
+    const sampleRate = audioBuffer.sampleRate;
+    const length = audioBuffer.length;
+    const buffer = new ArrayBuffer(44 + length * numChannels * 2);
+    const view = new DataView(buffer);
+
+    const writeString = (offset, str) => {
+      for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
     };
 
-    recorder.start();
+    writeString(0, 'RIFF');
+    view.setUint32(4, 36 + length * numChannels * 2, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, numChannels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * numChannels * 2, true);
+    view.setUint16(32, numChannels * 2, true);
+    view.setUint16(34, 16, true);
+    writeString(36, 'data');
+    view.setUint32(40, length * numChannels * 2, true);
 
-    // Play the song through the normal audio engine (captured by MediaRecorder)
-    const onExportDone = () => {
-      // Small delay to capture tail/reverb
-      setTimeout(() => recorder.stop(), 1500);
-    };
+    const channels = [];
+    for (let c = 0; c < numChannels; c++) channels.push(audioBuffer.getChannelData(c));
 
-    if (selected.type === 'builtin') {
-      const song = selected.song;
-      const beatMs = 60000 / song.bpm;
-      let time = 0;
-      song.notes.forEach(note => {
-        setTimeout(() => {
-          playNote(note.n, this.currentInstrument.id);
-        }, time);
-        time += note.d * beatMs;
-      });
-      setTimeout(onExportDone, time + 500);
-    } else {
-      const events = selected.song.events || [];
-      events.forEach(evt => {
-        setTimeout(() => {
-          playNote(evt.noteId, evt.instrumentId || this.currentInstrument.id);
-        }, evt.time);
-      });
-      const lastTime = events.length > 0 ? events[events.length - 1].time : 0;
-      setTimeout(onExportDone, lastTime + 500);
+    let offset = 44;
+    for (let i = 0; i < length; i++) {
+      for (let c = 0; c < numChannels; c++) {
+        const sample = Math.max(-1, Math.min(1, channels[c][i]));
+        view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
+        offset += 2;
+      }
     }
+
+    return new Blob([buffer], { type: 'audio/wav' });
   }
 
   _deleteSelectedSong() {
