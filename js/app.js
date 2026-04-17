@@ -418,7 +418,7 @@ async function loadSample(instrumentId, noteId = "") {
   const config = getSampleConfig(instrumentId, noteId);
   if (!config?.path) return null;
 
-  const ctx = ensureAudioContext(false);
+  const ctx = ensureAudioContext(true);
   if (!ctx) return null;
 
   const cacheKey = getSampleCacheKey(instrumentId, noteId);
@@ -1262,7 +1262,8 @@ class App {
       const p = overlay.querySelector('.overlay-content p');
       if (p) p.textContent = '✦ Chargement... ✦';
       this._samplesReady = false;
-      warmupSamples(this.currentInstrument.id).then(() => {
+      const warmupTimeout = new Promise(r => setTimeout(r, 10000));
+      Promise.race([warmupSamples(this.currentInstrument.id), warmupTimeout]).then(() => {
         this._samplesReady = true;
         overlay.classList.add('hidden');
         setTimeout(() => overlay.style.display = 'none', 500);
