@@ -1885,11 +1885,6 @@ class App {
   let status = document.getElementById('youtube-status');
   let resultsContainer = document.getElementById('youtube-results');
   const STORAGE_KEY = 'ouiss_youtube_search_query';
-  const INVIDIOUS_INSTANCES = [
-    'https://inv.nadeko.net',
-    'https://invidious.jing.rocks',
-    'https://invidious.privacyredirect.com',
-  ];
 
   if (!input || !btn || !wrapper || !playerDiv) return;
 
@@ -1915,22 +1910,9 @@ class App {
     resultsContainer.innerHTML = '';
   }
 
-  function playVideo(videoId) {
-    const embedUrl = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(videoId)}?autoplay=1&rel=0`;
-
-    wrapper.classList.add('visible');
-    playerDiv.innerHTML = '';
-
-    const iframe = document.createElement('iframe');
-    iframe.src = embedUrl;
-    iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture';
-    iframe.allowFullscreen = true;
-    iframe.title = 'YouTube';
-    playerDiv.appendChild(iframe);
-  }
-
   function playSearch(queryText) {
-    const embedUrl = `https://www.youtube-nocookie.com/embed?autoplay=1&rel=0&listType=search&list=${encodeURIComponent(queryText)}`;
+    // Use standard YouTube embed endpoint for search playlists.
+    const embedUrl = `https://www.youtube.com/embed?autoplay=1&rel=0&listType=search&list=${encodeURIComponent(queryText)}`;
 
     wrapper.classList.add('visible');
     playerDiv.innerHTML = '';
@@ -1941,105 +1923,6 @@ class App {
     iframe.allowFullscreen = true;
     iframe.title = 'YouTube';
     playerDiv.appendChild(iframe);
-  }
-
-  function selectResult(buttonEl, videoId) {
-    const prev = resultsContainer.querySelector('.yt-result.active');
-    if (prev) prev.classList.remove('active');
-    buttonEl.classList.add('active');
-    playVideo(videoId);
-  }
-
-  function normalizeResult(raw) {
-    if (!raw || (raw.type && raw.type !== 'video')) return null;
-
-    const videoId = raw.videoId || raw.id;
-    if (!videoId) return null;
-
-    const title = raw.title || 'Video sans titre';
-    const author = raw.author || raw.uploaderName || 'Chaîne inconnue';
-    const duration = raw.lengthText || raw.duration || '';
-    const thumb = raw.videoThumbnails?.[3]?.url
-      || raw.videoThumbnails?.[0]?.url
-      || `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`;
-
-    return { videoId, title, author, duration, thumb };
-  }
-
-  function renderResults(items) {
-    clearResults();
-
-    items.forEach((item, idx) => {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'yt-result';
-      button.setAttribute('role', 'listitem');
-
-      const thumb = document.createElement('img');
-      thumb.className = 'yt-thumb';
-      thumb.src = item.thumb;
-      thumb.alt = `Miniature ${item.title}`;
-      thumb.loading = 'lazy';
-
-      const meta = document.createElement('div');
-      meta.className = 'yt-meta';
-
-      const title = document.createElement('div');
-      title.className = 'yt-title';
-      title.textContent = item.title;
-
-      const sub = document.createElement('div');
-      sub.className = 'yt-sub';
-      sub.textContent = item.duration ? `${item.author} • ${item.duration}` : item.author;
-
-      meta.appendChild(title);
-      meta.appendChild(sub);
-      button.appendChild(thumb);
-      button.appendChild(meta);
-
-      button.addEventListener('click', () => selectResult(button, item.videoId));
-      resultsContainer.appendChild(button);
-
-      if (idx === 0) {
-        selectResult(button, item.videoId);
-      }
-    });
-  }
-
-  async function fetchWithTimeout(url, timeoutMs = 7000) {
-    const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      return await fetch(url, { signal: controller.signal });
-    } finally {
-      window.clearTimeout(timeoutId);
-    }
-  }
-
-  async function searchVideos(queryText) {
-    const encoded = encodeURIComponent(queryText);
-
-    for (const instance of INVIDIOUS_INSTANCES) {
-      try {
-        const url = `${instance}/api/v1/search?q=${encoded}&type=video&sort_by=relevance&page=1`;
-        const res = await fetchWithTimeout(url);
-        if (!res.ok) continue;
-
-        const data = await res.json();
-        const normalized = (Array.isArray(data) ? data : [])
-          .map(normalizeResult)
-          .filter(Boolean)
-          .slice(0, 8);
-
-        if (normalized.length > 0) {
-          return normalized;
-        }
-      } catch (_) {
-        // Try next public instance.
-      }
-    }
-
-    return [];
   }
 
   async function loadSearch() {
@@ -2048,18 +1931,8 @@ class App {
 
     setStatus(`Recherche de "${rawValue}"...`);
     clearResults();
-    // Always open something playable immediately, even if external search APIs fail.
     playSearch(rawValue);
-
-    const results = await searchVideos(rawValue);
-
-    if (results.length === 0) {
-      setStatus('Lecture lancee. Liste detaillee indisponible pour le moment (reseau/API).');
-      return;
-    }
-
-    renderResults(results);
-    setStatus(`${results.length} resultats trouves pour "${rawValue}".`);
+    setStatus(`Resultats YouTube affiches et lisibles pour "${rawValue}".`);
 
     try {
       localStorage.setItem(STORAGE_KEY, rawValue);
@@ -2073,7 +1946,7 @@ class App {
       const rawValue = input.value.trim();
       if (!rawValue) return;
       playSearch(rawValue);
-      setStatus('Lecture lancee, mais impossible de charger la liste des resultats.');
+      setStatus('Resultats YouTube affiches et lisibles.');
     });
   });
   input.addEventListener('keydown', (e) => {
@@ -2083,7 +1956,7 @@ class App {
         const rawValue = input.value.trim();
         if (!rawValue) return;
         playSearch(rawValue);
-        setStatus('Lecture lancee, mais impossible de charger la liste des resultats.');
+        setStatus('Resultats YouTube affiches et lisibles.');
       });
     }
     // Stop key events from triggering instrument notes
