@@ -1882,39 +1882,15 @@ class App {
   const btn = document.getElementById('btn-yt-load');
   const wrapper = document.getElementById('youtube-player-wrapper');
   const playerDiv = document.getElementById('youtube-player');
+  const STORAGE_KEY = 'ouiss_youtube_search_query';
 
   if (!input || !btn || !wrapper || !playerDiv) return;
 
-  function extractVideoId(url) {
-    if (!url) return null;
-    // youtu.be/ID
-    let m = url.match(/youtu\.be\/([a-zA-Z0-9_-]{11})/);
-    if (m) return m[1];
-    // youtube.com/watch?v=ID
-    m = url.match(/[?&]v=([a-zA-Z0-9_-]{11})/);
-    if (m) return m[1];
-    // youtube.com/embed/ID
-    m = url.match(/\/embed\/([a-zA-Z0-9_-]{11})/);
-    if (m) return m[1];
-    // youtube.com/shorts/ID
-    m = url.match(/\/shorts\/([a-zA-Z0-9_-]{11})/);
-    if (m) return m[1];
-    return null;
-  }
-
-  function loadVideo() {
+  function loadSearch() {
     const rawValue = input.value.trim();
     if (!rawValue) return;
-
-    const videoId = extractVideoId(rawValue);
-    let embedUrl = '';
-
-    if (videoId) {
-      embedUrl = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(videoId)}?autoplay=0&rel=0`;
-    } else {
-      const query = encodeURIComponent(rawValue);
-      embedUrl = `https://www.youtube-nocookie.com/embed?autoplay=0&rel=0&listType=search&list=${query}`;
-    }
+    const query = encodeURIComponent(rawValue);
+    const embedUrl = `https://www.youtube-nocookie.com/embed?autoplay=0&rel=0&listType=search&list=${query}`;
 
     wrapper.classList.add('visible');
     playerDiv.innerHTML = '';
@@ -1925,19 +1901,35 @@ class App {
     iframe.allowFullscreen = true;
     iframe.title = 'YouTube';
     playerDiv.appendChild(iframe);
+
+    try {
+      localStorage.setItem(STORAGE_KEY, rawValue);
+    } catch (_) {
+      // Ignore storage restrictions in private mode or blocked storage.
+    }
   }
 
-  btn.addEventListener('click', loadVideo);
+  btn.addEventListener('click', loadSearch);
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      loadVideo();
+      loadSearch();
     }
     // Stop key events from triggering instrument notes
     e.stopPropagation();
   });
   input.addEventListener('keyup', (e) => e.stopPropagation());
   input.addEventListener('keypress', (e) => e.stopPropagation());
+
+  try {
+    const lastQuery = localStorage.getItem(STORAGE_KEY);
+    if (lastQuery) {
+      input.value = lastQuery;
+      loadSearch();
+    }
+  } catch (_) {
+    // Ignore storage restrictions in private mode or blocked storage.
+  }
 })();
 
 // ==================== INIT ====================
