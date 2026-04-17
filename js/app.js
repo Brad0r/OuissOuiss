@@ -168,6 +168,33 @@ SKY_NIGHTLY_INSTRUMENTS_DATA.forEach(inst => {
   };
 })();
 
+// ==================== CELLO (FluidR3 GM SoundFont — real multi-sampled cello) ====================
+
+(function buildCelloSampleConfig() {
+  const cdnBase = "https://cdn.jsdelivr.net/gh/gleitz/midi-js-soundfonts@gh-pages/FluidR3_GM/cello-mp3";
+  const noteFileMap = {
+    c3: "C3", d3: "D3", e3: "E3", f3: "F3", g3: "G3", a3: "A3", b3: "B3",
+    c4: "C4", d4: "D4", e4: "E4", f4: "F4", g4: "G4", a4: "A4", b4: "B4",
+    c5: "C5",
+  };
+  const notes = {};
+  NOTE_IDS.forEach(noteId => {
+    const noteData = NOTES.find(n => n.id === noteId);
+    const fileName = noteFileMap[noteId];
+    if (!noteData || !fileName) return;
+    notes[noteId] = {
+      path: `${cdnBase}/${fileName}.mp3`,
+      rootFreq: noteData.freq,
+    };
+  });
+  SAMPLE_CONFIGS["cello"] = {
+    path: `${cdnBase}/A3.mp3`,
+    rootFreq: 220,
+    loop: false,
+    notes,
+  };
+})();
+
 // ==================== INSTRUMENTS LIST ====================
 
 const INSTRUMENTS = [
@@ -175,6 +202,7 @@ const INSTRUMENTS = [
     id: inst.id, name: inst.label, emoji: inst.emoji, family: inst.family, sustain: inst.sustain,
   })),
   { id: "violin", name: "Violon", emoji: "🎻", family: "violin", sustain: true },
+  { id: "cello", name: "Violoncelle", emoji: "🎻", family: "cello", sustain: true },
 ];
 
 // ==================== AUDIO STATE (from SabSab) ====================
@@ -255,6 +283,7 @@ function getInstrumentMixGain(instrumentId) {
     "sky-sfx-mothcall": 1.35, "sky-sfx-jellycall": 1.35,
     "sky-sfx-spiritmantacall": 1.35,
     "violin": 1.45,
+    "cello": 1.5,
   };
   return gains[instrumentId] || 1;
 }
@@ -325,6 +354,16 @@ function getSkyNightlyInstrumentProfile(instrument) {
       sustainGain: Math.max(0.065, musicVolume * 0.16),
       releaseSeconds: 0.85, autoStopAfter: 3.5,
       ambienceAmount: 0.3, ambienceDelay: 0.05, ambienceFeedback: 0.1,
+    };
+  }
+  if (family === "cello") {
+    return {
+      filterType: "lowpass", filterFrequency: 4200, filterQ: 0.6,
+      attackSeconds: 0.035,
+      peakGain: Math.max(0.11, musicVolume * 0.24),
+      sustainGain: Math.max(0.07, musicVolume * 0.17),
+      releaseSeconds: 0.95, autoStopAfter: 3.8,
+      ambienceAmount: 0.35, ambienceDelay: 0.055, ambienceFeedback: 0.12,
     };
   }
   return {
@@ -618,7 +657,7 @@ function createVoice(note, instrumentId, options = {}) {
     source.connect(mixer);
     extraSources.push(source);
 
-    if (isSkyNightlyInstrument(instrumentId) || instrumentId === "violin") {
+    if (isSkyNightlyInstrument(instrumentId) || instrumentId === "violin" || instrumentId === "cello") {
       const profile = getSkyNightlyInstrumentProfile(instrument);
       filter.type = profile.filterType;
       filter.frequency.setValueAtTime(profile.filterFrequency, now);
@@ -659,7 +698,7 @@ function createVoice(note, instrumentId, options = {}) {
         voiceGain.gain.setValueAtTime(Math.max(0.0001, releaseHoldLevel), stopAt);
         voiceGain.gain.linearRampToValueAtTime(0, stopAt + safeRelease);
       } catch { /* ignore */ }
-      const tailPadding = (isSkyNightlyInstrument(instrumentId) || instrumentId === "violin") ? 0.42 : 0.12;
+      const tailPadding = (isSkyNightlyInstrument(instrumentId) || instrumentId === "violin" || instrumentId === "cello") ? 0.42 : 0.12;
       const cleanupDelay = (safeRelease + tailPadding) * 1000 + 50;
       extraSources.forEach(node => {
         try { node.stop(stopAt + safeRelease + tailPadding); } catch { /* ignore */ }
@@ -800,6 +839,31 @@ function createVoice(note, instrumentId, options = {}) {
       }
       releaseSeconds = options.sustain ? 0.6 : 0.5;
       autoStopAfter = options.sustain ? 0 : 1.85;
+      break;
+    }
+    case "cello": {
+      // Bowed cello: deeper sawtooth + warm body resonance + slow vibrato
+      const bow1 = addOscillator("sawtooth", note.freq, 0.3, -2.5);
+      const bow2 = addOscillator("sawtooth", note.freq, 0.2, 2.8);
+      const body = addOscillator([1, 0.9, 0.7, 0.5, 0.35, 0.25, 0.18, 0.12, 0.08], note.freq, 0.25);
+      addOscillator("sine", note.freq * 2, 0.07);
+      addOscillator("sine", note.freq * 0.5, 0.08);
+      addBreathNoise(0.006, Math.max(800, note.freq * 3.5));
+      addNoiseBurst({ type: "bandpass", frequency: Math.max(1000, note.freq * 2.5), q: 1.5, peak: 0.005, attack: 0.012, decay: 0.09, duration: 0.22 });
+      addVibrato([bow1, bow2, body], 4.8, Math.max(1.5, note.freq * 0.0038));
+      addAmbienceSend(0.4, 0.065, 0.15);
+      filter.type = "lowpass";
+      filter.frequency.setValueAtTime(3800, now);
+      filter.frequency.exponentialRampToValueAtTime(2600, now + 0.3);
+      filter.Q.value = 1.1;
+      voiceGain.gain.linearRampToValueAtTime(Math.max(0.02, toneLevel * 0.35), now + 0.07);
+      voiceGain.gain.linearRampToValueAtTime(Math.max(0.045, toneLevel * 1.1), now + 0.16);
+      voiceGain.gain.linearRampToValueAtTime(Math.max(0.03, toneLevel * (options.sustain ? 0.8 : 0.65)), now + 0.4);
+      if (!options.sustain) {
+        voiceGain.gain.linearRampToValueAtTime(0, now + 2.8);
+      }
+      releaseSeconds = options.sustain ? 0.75 : 0.6;
+      autoStopAfter = options.sustain ? 0 : 2.85;
       break;
     }
     case "violin": {
