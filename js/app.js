@@ -1818,6 +1818,101 @@ class App {
   }
 }
 
+// ==================== ANIMATED STARS ====================
+
+(function generateStars() {
+  const container = document.getElementById('stars');
+  if (!container) return;
+
+  const STAR_COUNT = 80;
+  const colors = [
+    'rgba(255,255,255,',
+    'rgba(255,220,150,',
+    'rgba(200,220,255,',
+  ];
+
+  const frag = document.createDocumentFragment();
+
+  for (let i = 0; i < STAR_COUNT; i++) {
+    const star = document.createElement('div');
+    star.className = 'star';
+
+    const x = Math.random() * 100;
+    const y = Math.random() * 100;
+    const size = 1 + Math.random() * 1.5;            // 1–2.5px
+    const bright = 0.4 + Math.random() * 0.5;        // 0.4–0.9
+    const dur = 4 + Math.random() * 6;               // 4–10s (slow)
+    const delay = Math.random() * dur;                // random phase
+    const colorBase = colors[Math.floor(Math.random() * colors.length)];
+
+    star.style.left = x + '%';
+    star.style.top = y + '%';
+    star.style.width = size + 'px';
+    star.style.height = size + 'px';
+    star.style.color = colorBase + bright + ')';
+    star.style.setProperty('--bright', bright.toString());
+    star.style.setProperty('--dur', dur + 's');
+    star.style.setProperty('--delay', delay + 's');
+
+    frag.appendChild(star);
+  }
+
+  container.appendChild(frag);
+})();
+
+// ==================== YOUTUBE PLAYER ====================
+
+(function initYouTubePlayer() {
+  const input = document.getElementById('youtube-url');
+  const btn = document.getElementById('btn-yt-load');
+  const wrapper = document.getElementById('youtube-player-wrapper');
+  const playerDiv = document.getElementById('youtube-player');
+
+  function extractVideoId(url) {
+    if (!url) return null;
+    // youtu.be/ID
+    let m = url.match(/youtu\.be\/([a-zA-Z0-9_-]{11})/);
+    if (m) return m[1];
+    // youtube.com/watch?v=ID
+    m = url.match(/[?&]v=([a-zA-Z0-9_-]{11})/);
+    if (m) return m[1];
+    // youtube.com/embed/ID
+    m = url.match(/\/embed\/([a-zA-Z0-9_-]{11})/);
+    if (m) return m[1];
+    // youtube.com/shorts/ID
+    m = url.match(/\/shorts\/([a-zA-Z0-9_-]{11})/);
+    if (m) return m[1];
+    return null;
+  }
+
+  function loadVideo() {
+    const videoId = extractVideoId(input.value.trim());
+    if (!videoId) return;
+
+    wrapper.classList.add('visible');
+    playerDiv.innerHTML = '';
+
+    const iframe = document.createElement('iframe');
+    iframe.src = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(videoId)}?autoplay=0&rel=0`;
+    iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture';
+    iframe.allowFullscreen = true;
+    iframe.title = 'YouTube';
+    playerDiv.appendChild(iframe);
+  }
+
+  btn.addEventListener('click', loadVideo);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      loadVideo();
+    }
+    // Stop key events from triggering instrument notes
+    e.stopPropagation();
+  });
+  input.addEventListener('keyup', (e) => e.stopPropagation());
+  input.addEventListener('keypress', (e) => e.stopPropagation());
+})();
+
 // ==================== INIT ====================
 document.addEventListener('DOMContentLoaded', () => {
   new App();
