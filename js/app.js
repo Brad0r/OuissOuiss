@@ -140,23 +140,30 @@ SKY_NIGHTLY_INSTRUMENTS_DATA.forEach(inst => {
   );
 });
 
-// ==================== VIOLIN (local sample, pitch-shifted) ====================
+// ==================== VIOLIN (FluidR3 GM SoundFont — real multi-sampled violin) ====================
 
 (function buildViolinSampleConfig() {
-  const violinPath = "assets/instruments/violin-a3.wav";
-  const rootFreq = 220; // A3
+  const cdnBase = "https://cdn.jsdelivr.net/gh/gleitz/midi-js-soundfonts@gh-pages/FluidR3_GM/violin-mp3";
+  // Map our note IDs to FluidR3 filenames (uppercase first letter + octave)
+  const noteFileMap = {
+    c3: "C3", d3: "D3", e3: "E3", f3: "F3", g3: "G3", a3: "A3", b3: "B3",
+    c4: "C4", d4: "D4", e4: "E4", f4: "F4", g4: "G4", a4: "A4", b4: "B4",
+    c5: "C5",
+  };
   const notes = {};
   NOTE_IDS.forEach(noteId => {
     const noteData = NOTES.find(n => n.id === noteId);
-    if (!noteData) return;
-    notes[noteId] = { path: violinPath, rootFreq };
+    const fileName = noteFileMap[noteId];
+    if (!noteData || !fileName) return;
+    notes[noteId] = {
+      path: `${cdnBase}/${fileName}.mp3`,
+      rootFreq: noteData.freq,   // each sample is its own root — no pitch-shifting needed
+    };
   });
   SAMPLE_CONFIGS["violin"] = {
-    path: violinPath,
-    rootFreq,
-    loop: true,
-    loopStart: 0.35,
-    loopEnd: 1.8,
+    path: `${cdnBase}/A3.mp3`,
+    rootFreq: 220,
+    loop: false,
     notes,
   };
 })();
@@ -312,12 +319,12 @@ function getSkyNightlyInstrumentProfile(instrument) {
   }
   if (family === "violin") {
     return {
-      filterType: "lowpass", filterFrequency: 4800, filterQ: 0.9,
-      attackSeconds: 0.06,
-      peakGain: Math.max(0.09, musicVolume * 0.19),
-      sustainGain: Math.max(0.055, musicVolume * 0.13),
-      releaseSeconds: 0.7, autoStopAfter: 0,
-      ambienceAmount: 0.38, ambienceDelay: 0.058, ambienceFeedback: 0.14,
+      filterType: "lowpass", filterFrequency: 6000, filterQ: 0.7,
+      attackSeconds: 0.025,
+      peakGain: Math.max(0.1, musicVolume * 0.22),
+      sustainGain: Math.max(0.065, musicVolume * 0.16),
+      releaseSeconds: 0.85, autoStopAfter: 3.5,
+      ambienceAmount: 0.3, ambienceDelay: 0.05, ambienceFeedback: 0.1,
     };
   }
   return {
@@ -601,11 +608,6 @@ function createVoice(note, instrumentId, options = {}) {
     const source = ctx.createBufferSource();
     source.buffer = sampleEntry.buffer;
     source.playbackRate.setValueAtTime(note.freq / sampleConfig.rootFreq, now);
-
-    // Violin vibrato on playback rate for realism
-    if (instrumentId === "violin") {
-      addPlaybackVibrato(source.playbackRate, 5.4, 0.0035);
-    }
     source.loop = Boolean(sampleConfig.loop && options.sustain);
 
     if (source.loop) {
