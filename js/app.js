@@ -2057,12 +2057,6 @@ class App {
       });
 
       resultsEl.appendChild(card);
-
-      // Auto-play first result
-      if (idx === 0) {
-        card.classList.add('active');
-        playVideoById(item.videoId);
-      }
     });
   }
 
