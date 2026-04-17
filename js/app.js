@@ -1824,7 +1824,7 @@ class App {
   const container = document.getElementById('stars');
   if (!container) return;
 
-  const STAR_COUNT = 80;
+  const STAR_COUNT = 130;
   const colors = [
     'rgba(255,255,255,',
     'rgba(255,220,150,',
@@ -1839,10 +1839,8 @@ class App {
 
     const x = Math.random() * 100;
     const y = Math.random() * 100;
-    const size = 1 + Math.random() * 1.5;            // 1–2.5px
-    const bright = 0.4 + Math.random() * 0.5;        // 0.4–0.9
-    const dur = 4 + Math.random() * 6;               // 4–10s (slow)
-    const delay = Math.random() * dur;                // random phase
+    const size = 1 + Math.random() * 2.2;
+    const bright = 0.45 + Math.random() * 0.5;
     const colorBase = colors[Math.floor(Math.random() * colors.length)];
 
     star.style.left = x + '%';
@@ -1851,8 +1849,25 @@ class App {
     star.style.height = size + 'px';
     star.style.color = colorBase + bright + ')';
     star.style.setProperty('--bright', bright.toString());
-    star.style.setProperty('--dur', dur + 's');
-    star.style.setProperty('--delay', delay + 's');
+
+    const animateStar = () => {
+      const visibleTime = 3500 + Math.random() * 7000;
+      const hiddenTime = 1200 + Math.random() * 2200;
+
+      star.classList.add('is-visible');
+      window.setTimeout(() => {
+        star.classList.remove('is-visible');
+
+        window.setTimeout(() => {
+          // Reappear from a new random position for a natural sky flicker.
+          star.style.left = (Math.random() * 100) + '%';
+          star.style.top = (Math.random() * 100) + '%';
+          animateStar();
+        }, hiddenTime);
+      }, visibleTime);
+    };
+
+    window.setTimeout(animateStar, Math.random() * 3000);
 
     frag.appendChild(star);
   }
@@ -1867,6 +1882,8 @@ class App {
   const btn = document.getElementById('btn-yt-load');
   const wrapper = document.getElementById('youtube-player-wrapper');
   const playerDiv = document.getElementById('youtube-player');
+
+  if (!input || !btn || !wrapper || !playerDiv) return;
 
   function extractVideoId(url) {
     if (!url) return null;
@@ -1886,14 +1903,24 @@ class App {
   }
 
   function loadVideo() {
-    const videoId = extractVideoId(input.value.trim());
-    if (!videoId) return;
+    const rawValue = input.value.trim();
+    if (!rawValue) return;
+
+    const videoId = extractVideoId(rawValue);
+    let embedUrl = '';
+
+    if (videoId) {
+      embedUrl = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(videoId)}?autoplay=0&rel=0`;
+    } else {
+      const query = encodeURIComponent(rawValue);
+      embedUrl = `https://www.youtube-nocookie.com/embed?autoplay=0&rel=0&listType=search&list=${query}`;
+    }
 
     wrapper.classList.add('visible');
     playerDiv.innerHTML = '';
 
     const iframe = document.createElement('iframe');
-    iframe.src = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(videoId)}?autoplay=0&rel=0`;
+    iframe.src = embedUrl;
     iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture';
     iframe.allowFullscreen = true;
     iframe.title = 'YouTube';
