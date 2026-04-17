@@ -1989,12 +1989,18 @@ class App {
 
     for (const base of instances) {
       try {
-        const data = await fetchJson(`${base}/api/v1/search?q=${encoded}&type=video`, 8000);
-        if (!Array.isArray(data)) continue;
+        const allItems = [];
+        for (let page = 1; page <= 3; page++) {
+          const data = await fetchJson(`${base}/api/v1/search?q=${encoded}&type=video&page=${page}`, 8000);
+          if (!Array.isArray(data)) break;
+          allItems.push(...data);
+          if (allItems.length >= 50) break;
+        }
+        if (allItems.length === 0) continue;
 
-        const items = data
+        const items = allItems
           .filter(item => item.videoId && item.type === 'video')
-          .slice(0, 10)
+          .slice(0, 50)
           .map(item => ({
             videoId: item.videoId,
             title: item.title || 'Video',

@@ -558,7 +558,7 @@ footer {
   display: grid;
   gap: 10px;
   margin-bottom: 14px;
-  max-height: 312px;
+  max-height: 282px;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }
