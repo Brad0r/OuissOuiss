@@ -140,12 +140,34 @@ SKY_NIGHTLY_INSTRUMENTS_DATA.forEach(inst => {
   );
 });
 
+// ==================== VIOLIN (local sample, pitch-shifted) ====================
+
+(function buildViolinSampleConfig() {
+  const violinPath = "assets/instruments/violin-a3.wav";
+  const rootFreq = 220; // A3
+  const notes = {};
+  NOTE_IDS.forEach(noteId => {
+    const noteData = NOTES.find(n => n.id === noteId);
+    if (!noteData) return;
+    notes[noteId] = { path: violinPath, rootFreq };
+  });
+  SAMPLE_CONFIGS["violin"] = {
+    path: violinPath,
+    rootFreq,
+    loop: true,
+    loopStart: 0.35,
+    loopEnd: 1.8,
+    notes,
+  };
+})();
+
 // ==================== INSTRUMENTS LIST ====================
 
 const INSTRUMENTS = [
   ...SKY_NIGHTLY_INSTRUMENTS_DATA.map(inst => ({
     id: inst.id, name: inst.label, emoji: inst.emoji, family: inst.family, sustain: inst.sustain,
   })),
+  { id: "violin", name: "Violon", emoji: "🎻", family: "violin", sustain: true },
 ];
 
 // ==================== AUDIO STATE (from SabSab) ====================
@@ -225,6 +247,7 @@ function getInstrumentMixGain(instrumentId) {
     "sky-sfx-fishcall": 1.35, "sky-sfx-mantacall": 1.35,
     "sky-sfx-mothcall": 1.35, "sky-sfx-jellycall": 1.35,
     "sky-sfx-spiritmantacall": 1.35,
+    "violin": 1.45,
   };
   return gains[instrumentId] || 1;
 }
@@ -285,6 +308,16 @@ function getSkyNightlyInstrumentProfile(instrument) {
       sustainGain: Math.max(0.032, musicVolume * 0.072),
       releaseSeconds: 0.9, autoStopAfter: 2.7,
       ambienceAmount: 0.15, ambienceDelay: 0.036, ambienceFeedback: 0.07,
+    };
+  }
+  if (family === "violin") {
+    return {
+      filterType: "lowpass", filterFrequency: 4800, filterQ: 0.9,
+      attackSeconds: 0.06,
+      peakGain: Math.max(0.09, musicVolume * 0.19),
+      sustainGain: Math.max(0.055, musicVolume * 0.13),
+      releaseSeconds: 0.7, autoStopAfter: 0,
+      ambienceAmount: 0.38, ambienceDelay: 0.058, ambienceFeedback: 0.14,
     };
   }
   return {
@@ -568,6 +601,11 @@ function createVoice(note, instrumentId, options = {}) {
     const source = ctx.createBufferSource();
     source.buffer = sampleEntry.buffer;
     source.playbackRate.setValueAtTime(note.freq / sampleConfig.rootFreq, now);
+
+    // Violin vibrato on playback rate for realism
+    if (instrumentId === "violin") {
+      addPlaybackVibrato(source.playbackRate, 5.4, 0.0035);
+    }
     source.loop = Boolean(sampleConfig.loop && options.sustain);
 
     if (source.loop) {
@@ -578,7 +616,7 @@ function createVoice(note, instrumentId, options = {}) {
     source.connect(mixer);
     extraSources.push(source);
 
-    if (isSkyNightlyInstrument(instrumentId)) {
+    if (isSkyNightlyInstrument(instrumentId) || instrumentId === "violin") {
       const profile = getSkyNightlyInstrumentProfile(instrument);
       filter.type = profile.filterType;
       filter.frequency.setValueAtTime(profile.filterFrequency, now);
@@ -619,7 +657,7 @@ function createVoice(note, instrumentId, options = {}) {
         voiceGain.gain.setValueAtTime(Math.max(0.0001, releaseHoldLevel), stopAt);
         voiceGain.gain.linearRampToValueAtTime(0, stopAt + safeRelease);
       } catch { /* ignore */ }
-      const tailPadding = isSkyNightlyInstrument(instrumentId) ? 0.42 : 0.12;
+      const tailPadding = (isSkyNightlyInstrument(instrumentId) || instrumentId === "violin") ? 0.42 : 0.12;
       const cleanupDelay = (safeRelease + tailPadding) * 1000 + 50;
       extraSources.forEach(node => {
         try { node.stop(stopAt + safeRelease + tailPadding); } catch { /* ignore */ }
@@ -760,6 +798,31 @@ function createVoice(note, instrumentId, options = {}) {
       }
       releaseSeconds = options.sustain ? 0.6 : 0.5;
       autoStopAfter = options.sustain ? 0 : 1.85;
+      break;
+    }
+    case "violin": {
+      // Bowed string synthesis: sawtooth + harmonics + vibrato + rosin noise
+      const bow1 = addOscillator("sawtooth", note.freq, 0.28, -3);
+      const bow2 = addOscillator("sawtooth", note.freq, 0.18, 3.5);
+      const body = addOscillator([1, 0.85, 0.62, 0.45, 0.32, 0.22, 0.15, 0.1], note.freq, 0.22);
+      addOscillator("sine", note.freq * 2, 0.09);
+      addOscillator("sine", note.freq * 3, 0.04);
+      addBreathNoise(0.008, Math.max(1200, note.freq * 4.5));
+      addNoiseBurst({ type: "bandpass", frequency: Math.max(1500, note.freq * 3), q: 1.8, peak: 0.006, attack: 0.01, decay: 0.08, duration: 0.2 });
+      addVibrato([bow1, bow2, body], 5.4, Math.max(1.8, note.freq * 0.0042));
+      addAmbienceSend(0.36, 0.06, 0.14);
+      filter.type = "lowpass";
+      filter.frequency.setValueAtTime(4600, now);
+      filter.frequency.exponentialRampToValueAtTime(3200, now + 0.25);
+      filter.Q.value = 1.3;
+      voiceGain.gain.linearRampToValueAtTime(Math.max(0.02, toneLevel * 0.4), now + 0.06);
+      voiceGain.gain.linearRampToValueAtTime(Math.max(0.04, toneLevel * 1.05), now + 0.14);
+      voiceGain.gain.linearRampToValueAtTime(Math.max(0.025, toneLevel * (options.sustain ? 0.75 : 0.6)), now + 0.35);
+      if (!options.sustain) {
+        voiceGain.gain.linearRampToValueAtTime(0, now + 2.5);
+      }
+      releaseSeconds = options.sustain ? 0.65 : 0.55;
+      autoStopAfter = options.sustain ? 0 : 2.55;
       break;
     }
     case "sky-xylophone": {
