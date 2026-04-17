@@ -1882,98 +1882,209 @@ class App {
   const btn = document.getElementById('btn-yt-load');
   const wrapper = document.getElementById('youtube-player-wrapper');
   const playerDiv = document.getElementById('youtube-player');
-  let status = document.getElementById('youtube-status');
-  let resultsContainer = document.getElementById('youtube-results');
-  const STORAGE_KEY = 'ouiss_youtube_search_query';
+  const statusEl = document.getElementById('youtube-status');
+  const resultsEl = document.getElementById('youtube-results');
+  const STORAGE_KEY = 'ouiss_yt_query';
 
   if (!input || !btn || !wrapper || !playerDiv) return;
 
-  if (!status) {
-    status = document.createElement('div');
-    status.id = 'youtube-status';
-    status.setAttribute('aria-live', 'polite');
-    wrapper.parentElement?.insertBefore(status, wrapper);
-  }
+  const PIPED_INSTANCES = [
+    'https://pipedapi.kavin.rocks',
+    'https://pipedapi.adminforge.de',
+    'https://api.piped.privacydev.net',
+  ];
 
-  if (!resultsContainer) {
-    resultsContainer = document.createElement('div');
-    resultsContainer.id = 'youtube-results';
-    resultsContainer.setAttribute('role', 'list');
-    wrapper.parentElement?.insertBefore(resultsContainer, wrapper);
-  }
+  // --- Helpers ---
 
-  function setStatus(message) {
-    status.textContent = message;
+  function setStatus(msg) {
+    if (statusEl) statusEl.textContent = msg;
   }
 
   function clearResults() {
-    resultsContainer.innerHTML = '';
+    if (resultsEl) resultsEl.innerHTML = '';
   }
 
-  function playSearch(queryText) {
-    // Use standard YouTube embed endpoint for search playlists.
-    const embedUrl = `https://www.youtube.com/embed?autoplay=1&rel=0&listType=search&list=${encodeURIComponent(queryText)}`;
+  function extractVideoId(text) {
+    if (!text) return null;
+    let m;
+    m = text.match(/youtu\.be\/([a-zA-Z0-9_-]{11})/);
+    if (m) return m[1];
+    m = text.match(/[?&]v=([a-zA-Z0-9_-]{11})/);
+    if (m) return m[1];
+    m = text.match(/\/embed\/([a-zA-Z0-9_-]{11})/);
+    if (m) return m[1];
+    m = text.match(/\/shorts\/([a-zA-Z0-9_-]{11})/);
+    if (m) return m[1];
+    return null;
+  }
 
+  function isUrl(text) {
+    return /^https?:\/\//i.test(text) || /youtu\.?be/i.test(text);
+  }
+
+  // --- Playback ---
+
+  function playVideoById(videoId) {
+    const url = `https://www.youtube.com/embed/${encodeURIComponent(videoId)}?autoplay=1&rel=0`;
     wrapper.classList.add('visible');
     playerDiv.innerHTML = '';
-
     const iframe = document.createElement('iframe');
-    iframe.src = embedUrl;
+    iframe.src = url;
     iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture';
     iframe.allowFullscreen = true;
     iframe.title = 'YouTube';
     playerDiv.appendChild(iframe);
   }
 
-  async function loadSearch() {
-    const rawValue = input.value.trim();
-    if (!rawValue) return;
+  // --- Search via Piped API (CORS-friendly) ---
 
-    setStatus(`Recherche de "${rawValue}"...`);
-    clearResults();
-    playSearch(rawValue);
-    setStatus(`Resultats YouTube affiches et lisibles pour "${rawValue}".`);
-
+  async function fetchJson(url, timeoutMs) {
+    const ctrl = new AbortController();
+    const tid = setTimeout(() => ctrl.abort(), timeoutMs || 6000);
     try {
-      localStorage.setItem(STORAGE_KEY, rawValue);
-    } catch (_) {
-      // Ignore storage restrictions in private mode or blocked storage.
+      const res = await fetch(url, { signal: ctrl.signal });
+      if (!res.ok) throw new Error(res.status);
+      return await res.json();
+    } finally {
+      clearTimeout(tid);
     }
   }
 
-  btn.addEventListener('click', () => {
-    loadSearch().catch(() => {
-      const rawValue = input.value.trim();
-      if (!rawValue) return;
-      playSearch(rawValue);
-      setStatus('Resultats YouTube affiches et lisibles.');
+  async function searchPiped(query) {
+    const encoded = encodeURIComponent(query);
+    for (const base of PIPED_INSTANCES) {
+      try {
+        const data = await fetchJson(`${base}/search?q=${encoded}&filter=videos`, 6000);
+        const items = (data.items || []).filter(i => i.url && i.title).slice(0, 8);
+        if (items.length > 0) return items;
+      } catch (_) { /* try next */ }
+    }
+    return [];
+  }
+
+  // --- Render results ---
+
+  function renderResults(items) {
+    clearResults();
+    if (!resultsEl) return;
+
+    items.forEach((item, idx) => {
+      const videoId = (item.url || '').replace('/watch?v=', '');
+      if (!videoId) return;
+
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'yt-result';
+
+      const thumb = document.createElement('img');
+      thumb.className = 'yt-thumb';
+      thumb.src = item.thumbnail || `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`;
+      thumb.alt = item.title;
+      thumb.loading = idx === 0 ? 'eager' : 'lazy';
+
+      const meta = document.createElement('div');
+      meta.className = 'yt-meta';
+
+      const title = document.createElement('div');
+      title.className = 'yt-title';
+      title.textContent = item.title;
+
+      const sub = document.createElement('div');
+      sub.className = 'yt-sub';
+      const channel = item.uploaderName || '';
+      const dur = item.duration ? formatDuration(item.duration) : '';
+      sub.textContent = [channel, dur].filter(Boolean).join(' • ');
+
+      meta.appendChild(title);
+      meta.appendChild(sub);
+      card.appendChild(thumb);
+      card.appendChild(meta);
+
+      card.addEventListener('click', () => {
+        const prev = resultsEl.querySelector('.yt-result.active');
+        if (prev) prev.classList.remove('active');
+        card.classList.add('active');
+        playVideoById(videoId);
+        setStatus(`Lecture : ${item.title}`);
+      });
+
+      resultsEl.appendChild(card);
+
+      // Auto-play first result
+      if (idx === 0) {
+        card.classList.add('active');
+        playVideoById(videoId);
+      }
     });
-  });
+  }
+
+  function formatDuration(seconds) {
+    if (!seconds || seconds < 0) return '';
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return m + ':' + String(s).padStart(2, '0');
+  }
+
+  // --- Main action ---
+
+  async function handleInput() {
+    const raw = input.value.trim();
+    if (!raw) return;
+
+    // Case 1: Direct YouTube link
+    if (isUrl(raw)) {
+      const vid = extractVideoId(raw);
+      if (vid) {
+        clearResults();
+        playVideoById(vid);
+        setStatus('Lecture de la video.');
+        saveQuery(raw);
+        return;
+      }
+    }
+
+    // Case 2: Search query
+    setStatus(`Recherche de "${raw}"...`);
+    clearResults();
+
+    const results = await searchPiped(raw);
+
+    if (results.length === 0) {
+      setStatus('Aucun resultat. Verifie ta connexion ou reessaie.');
+      return;
+    }
+
+    renderResults(results);
+    setStatus(`${results.length} resultats pour "${raw}".`);
+    saveQuery(raw);
+  }
+
+  function saveQuery(val) {
+    try { localStorage.setItem(STORAGE_KEY, val); } catch (_) {}
+  }
+
+  // --- Events ---
+
+  btn.addEventListener('click', () => handleInput().catch(() => setStatus('Erreur lors de la recherche.')));
+
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      loadSearch().catch(() => {
-        const rawValue = input.value.trim();
-        if (!rawValue) return;
-        playSearch(rawValue);
-        setStatus('Resultats YouTube affiches et lisibles.');
-      });
+      handleInput().catch(() => setStatus('Erreur lors de la recherche.'));
     }
-    // Stop key events from triggering instrument notes
     e.stopPropagation();
   });
   input.addEventListener('keyup', (e) => e.stopPropagation());
   input.addEventListener('keypress', (e) => e.stopPropagation());
 
+  // Restore last query
   try {
-    const lastQuery = localStorage.getItem(STORAGE_KEY);
-    if (lastQuery) {
-      input.value = lastQuery;
-      loadSearch().catch(() => setStatus('Impossible de charger la recherche precedente.'));
+    const last = localStorage.getItem(STORAGE_KEY);
+    if (last) {
+      input.value = last;
+      handleInput().catch(() => {});
     }
-  } catch (_) {
-    // Ignore storage restrictions in private mode or blocked storage.
-  }
+  } catch (_) {}
 })();
 
 // ==================== INIT ====================
