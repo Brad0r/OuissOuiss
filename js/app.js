@@ -1882,8 +1882,8 @@ class App {
   const btn = document.getElementById('btn-yt-load');
   const wrapper = document.getElementById('youtube-player-wrapper');
   const playerDiv = document.getElementById('youtube-player');
-  const status = document.getElementById('youtube-status');
-  const resultsContainer = document.getElementById('youtube-results');
+  let status = document.getElementById('youtube-status');
+  let resultsContainer = document.getElementById('youtube-results');
   const STORAGE_KEY = 'ouiss_youtube_search_query';
   const INVIDIOUS_INSTANCES = [
     'https://inv.nadeko.net',
@@ -1891,7 +1891,21 @@ class App {
     'https://invidious.privacyredirect.com',
   ];
 
-  if (!input || !btn || !wrapper || !playerDiv || !status || !resultsContainer) return;
+  if (!input || !btn || !wrapper || !playerDiv) return;
+
+  if (!status) {
+    status = document.createElement('div');
+    status.id = 'youtube-status';
+    status.setAttribute('aria-live', 'polite');
+    wrapper.parentElement?.insertBefore(status, wrapper);
+  }
+
+  if (!resultsContainer) {
+    resultsContainer = document.createElement('div');
+    resultsContainer.id = 'youtube-results';
+    resultsContainer.setAttribute('role', 'list');
+    wrapper.parentElement?.insertBefore(resultsContainer, wrapper);
+  }
 
   function setStatus(message) {
     status.textContent = message;
@@ -1903,6 +1917,20 @@ class App {
 
   function playVideo(videoId) {
     const embedUrl = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(videoId)}?autoplay=1&rel=0`;
+
+    wrapper.classList.add('visible');
+    playerDiv.innerHTML = '';
+
+    const iframe = document.createElement('iframe');
+    iframe.src = embedUrl;
+    iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture';
+    iframe.allowFullscreen = true;
+    iframe.title = 'YouTube';
+    playerDiv.appendChild(iframe);
+  }
+
+  function playSearch(queryText) {
+    const embedUrl = `https://www.youtube-nocookie.com/embed?autoplay=1&rel=0&listType=search&list=${encodeURIComponent(queryText)}`;
 
     wrapper.classList.add('visible');
     playerDiv.innerHTML = '';
@@ -2020,12 +2048,13 @@ class App {
 
     setStatus(`Recherche de "${rawValue}"...`);
     clearResults();
-    wrapper.classList.remove('visible');
+    // Always open something playable immediately, even if external search APIs fail.
+    playSearch(rawValue);
 
     const results = await searchVideos(rawValue);
 
     if (results.length === 0) {
-      setStatus('Aucun resultat charge. Reessaie dans quelques secondes.');
+      setStatus('Lecture lancee. Liste detaillee indisponible pour le moment (reseau/API).');
       return;
     }
 
@@ -2039,11 +2068,23 @@ class App {
     }
   }
 
-  btn.addEventListener('click', loadSearch);
+  btn.addEventListener('click', () => {
+    loadSearch().catch(() => {
+      const rawValue = input.value.trim();
+      if (!rawValue) return;
+      playSearch(rawValue);
+      setStatus('Lecture lancee, mais impossible de charger la liste des resultats.');
+    });
+  });
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      loadSearch();
+      loadSearch().catch(() => {
+        const rawValue = input.value.trim();
+        if (!rawValue) return;
+        playSearch(rawValue);
+        setStatus('Lecture lancee, mais impossible de charger la liste des resultats.');
+      });
     }
     // Stop key events from triggering instrument notes
     e.stopPropagation();
