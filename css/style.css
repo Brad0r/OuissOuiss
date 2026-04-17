@@ -558,6 +558,9 @@ footer {
   display: grid;
   gap: 10px;
   margin-bottom: 14px;
+  max-height: 312px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .yt-result {
