@@ -1888,12 +1888,6 @@ class App {
 
   if (!input || !btn || !wrapper || !playerDiv) return;
 
-  const PIPED_INSTANCES = [
-    'https://pipedapi.kavin.rocks',
-    'https://pipedapi.adminforge.de',
-    'https://api.piped.privacydev.net',
-  ];
-
   // --- Helpers ---
 
   function setStatus(msg) {
@@ -1936,11 +1930,11 @@ class App {
     playerDiv.appendChild(iframe);
   }
 
-  // --- Search via Piped API (CORS-friendly) ---
+  // --- Fetch helper ---
 
   async function fetchJson(url, timeoutMs) {
     const ctrl = new AbortController();
-    const tid = setTimeout(() => ctrl.abort(), timeoutMs || 6000);
+    const tid = setTimeout(() => ctrl.abort(), timeoutMs || 8000);
     try {
       const res = await fetch(url, { signal: ctrl.signal });
       if (!res.ok) throw new Error(res.status);
@@ -1950,14 +1944,71 @@ class App {
     }
   }
 
-  async function searchPiped(query) {
+  // --- Discover working Invidious instances dynamically ---
+
+  let cachedInstances = null;
+
+  async function getInvidiousInstances() {
+    if (cachedInstances) return cachedInstances;
+
+    // Hardcoded known-good instances as immediate fallback
+    const hardcoded = [
+      'https://iv.melmac.space',
+      'https://invidious.materialio.us',
+      'https://invidious.fdn.fr',
+      'https://inv.tux.pizza',
+      'https://invidious.nerdvpn.de',
+      'https://invidious.protokolla.fi',
+    ];
+
+    // Try to discover more from the public instance list
+    try {
+      const data = await fetchJson('https://api.invidious.io/instances.json?sort_by=type,health', 5000);
+      if (Array.isArray(data)) {
+        const discovered = data
+          .filter(([, info]) => info && info.type === 'https' && info.api === true && info.cors === true)
+          .map(([, info]) => info.uri)
+          .filter(Boolean)
+          .slice(0, 10);
+        if (discovered.length > 0) {
+          cachedInstances = discovered;
+          return cachedInstances;
+        }
+      }
+    } catch (_) { /* use hardcoded */ }
+
+    cachedInstances = hardcoded;
+    return cachedInstances;
+  }
+
+  // --- Search via Invidious API ---
+
+  async function searchInvidious(query) {
     const encoded = encodeURIComponent(query);
-    for (const base of PIPED_INSTANCES) {
+    const instances = await getInvidiousInstances();
+
+    for (const base of instances) {
       try {
-        const data = await fetchJson(`${base}/search?q=${encoded}&filter=videos`, 6000);
-        const items = (data.items || []).filter(i => i.url && i.title).slice(0, 8);
+        const data = await fetchJson(`${base}/api/v1/search?q=${encoded}&type=video`, 8000);
+        if (!Array.isArray(data)) continue;
+
+        const items = data
+          .filter(item => item.videoId && item.type === 'video')
+          .slice(0, 10)
+          .map(item => ({
+            videoId: item.videoId,
+            title: item.title || 'Video',
+            author: item.author || '',
+            duration: item.lengthSeconds || 0,
+            thumb: (item.videoThumbnails && item.videoThumbnails.length > 0)
+              ? item.videoThumbnails.find(t => t.quality === 'medium')?.url
+                || item.videoThumbnails[0]?.url
+                || `https://i.ytimg.com/vi/${item.videoId}/mqdefault.jpg`
+              : `https://i.ytimg.com/vi/${item.videoId}/mqdefault.jpg`,
+          }));
+
         if (items.length > 0) return items;
-      } catch (_) { /* try next */ }
+      } catch (_) { /* try next instance */ }
     }
     return [];
   }
@@ -1969,16 +2020,14 @@ class App {
     if (!resultsEl) return;
 
     items.forEach((item, idx) => {
-      const videoId = (item.url || '').replace('/watch?v=', '');
-      if (!videoId) return;
-
       const card = document.createElement('button');
       card.type = 'button';
       card.className = 'yt-result';
 
       const thumb = document.createElement('img');
       thumb.className = 'yt-thumb';
-      thumb.src = item.thumbnail || `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`;
+      // Always use YouTube's own thumbnail CDN (no CORS issue for images)
+      thumb.src = `https://i.ytimg.com/vi/${item.videoId}/mqdefault.jpg`;
       thumb.alt = item.title;
       thumb.loading = idx === 0 ? 'eager' : 'lazy';
 
@@ -1991,9 +2040,8 @@ class App {
 
       const sub = document.createElement('div');
       sub.className = 'yt-sub';
-      const channel = item.uploaderName || '';
       const dur = item.duration ? formatDuration(item.duration) : '';
-      sub.textContent = [channel, dur].filter(Boolean).join(' • ');
+      sub.textContent = [item.author, dur].filter(Boolean).join(' • ');
 
       meta.appendChild(title);
       meta.appendChild(sub);
@@ -2004,7 +2052,7 @@ class App {
         const prev = resultsEl.querySelector('.yt-result.active');
         if (prev) prev.classList.remove('active');
         card.classList.add('active');
-        playVideoById(videoId);
+        playVideoById(item.videoId);
         setStatus(`Lecture : ${item.title}`);
       });
 
@@ -2013,7 +2061,7 @@ class App {
       // Auto-play first result
       if (idx === 0) {
         card.classList.add('active');
-        playVideoById(videoId);
+        playVideoById(item.videoId);
       }
     });
   }
@@ -2047,10 +2095,20 @@ class App {
     setStatus(`Recherche de "${raw}"...`);
     clearResults();
 
-    const results = await searchPiped(raw);
+    const results = await searchInvidious(raw);
 
     if (results.length === 0) {
-      setStatus('Aucun resultat. Verifie ta connexion ou reessaie.');
+      // Ultimate fallback: open YouTube search in the iframe
+      setStatus(`Ouverture de YouTube pour "${raw}"...`);
+      wrapper.classList.add('visible');
+      playerDiv.innerHTML = '';
+      const iframe = document.createElement('iframe');
+      iframe.src = `https://www.youtube.com/results?search_query=${encodeURIComponent(raw)}`;
+      iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture';
+      iframe.allowFullscreen = true;
+      iframe.title = 'YouTube Search';
+      playerDiv.appendChild(iframe);
+      saveQuery(raw);
       return;
     }
 
